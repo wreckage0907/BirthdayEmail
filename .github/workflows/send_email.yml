@@ -3,7 +3,7 @@ name: Send Birthday Email
 on:
   workflow_dispatch:
   schedule:
-    - cron: '10 05 * * *' 
+    - cron: '30 18 * * *' 
 
 jobs:
   send-email:
@@ -17,6 +17,6 @@ jobs:
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: "Happy Birthday, Chandan! 🎉"
-          body: "Wishing you a fantastic birthday, Chandan! Hope you have an amazing day! 🎂🥳"
+          body: "Wishing you a fantastic birthday, Chandan! 🎂🥳 \n\n - Girish Raghav"
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: "Girish Raghav"
