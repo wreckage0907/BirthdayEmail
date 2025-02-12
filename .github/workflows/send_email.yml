@@ -1,0 +1,21 @@
+name: Send Birthday Email
+
+on:
+  schedule:
+    - cron: '57 04 * * *' 
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Happy Birthday, Chandan! 🎉"
+          body: "Wishing you a fantastic birthday, Chandan! Hope you have an amazing day! 🎂🥳"
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: "Girish Raghav"
