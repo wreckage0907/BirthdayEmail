@@ -28,13 +28,10 @@ jobs:
           const axios = require('axios');
           const nodemailer = require('nodemailer');
 
-          // Load birthdays from JSON file
           const birthdays = JSON.parse(fs.readFileSync('birthdays.json', 'utf8'));
           
-          // Get today's date in MM-DD format
           const today = new Date().toISOString().slice(5,10);
           
-          // Find birthday match
           const birthdayPerson = birthdays.find(person => person.birthday === today);
           if (!birthdayPerson) {
             console.log("No birthdays today.");
@@ -68,11 +65,10 @@ jobs:
           }
           
           async function sendEmail(message) {
-            // Create a transporter object using SMTP
             const transporter = nodemailer.createTransport({
               host: process.env.SMTP_SERVER,
               port: process.env.SMTP_PORT,
-              secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+              secure: process.env.SMTP_PORT === '465',
               auth: {
                 user: process.env.EMAIL_USERNAME,
                 pass: process.env.EMAIL_PASSWORD
@@ -80,9 +76,8 @@ jobs:
             });
             
             try {
-              // Send email
               const info = await transporter.sendMail({
-                from: `"Girish Raghav"`,
+                from: `Girish Raghav`,
                 to: birthdayPerson.email,
                 subject: `Happy Birthday, ${birthdayPerson.name}! 🎉`,
                 text: `${message}\n\nBest wishes,\nGirish Raghav`
