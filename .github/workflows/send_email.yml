@@ -1,14 +1,51 @@
-name: Send Birthday Email
-
+name: Send Birthday Email with Gemini Message
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 18 * * *' 
+    - cron: '30 18 * * *'
 
 jobs:
   send-email:
     runs-on: ubuntu-latest
     steps:
+      - name: Generate Birthday Message
+        id: generate-message
+        uses: actions/github-script@v6
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          script: |
+            const axios = require('axios');
+            
+            try {
+              const response = await axios.post(
+                'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+                {
+                  contents: [{
+                    parts: [{
+                      text: "Write a warm, personalized birthday message for Chandan. Keep it under 100 words. Include some emojis."
+                    }]
+                  }]
+                },
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': process.env.GEMINI_API_KEY
+                  },
+                  params: {
+                    key: process.env.GEMINI_API_KEY
+                  }
+                }
+              );
+              
+              const message = response.data.candidates[0].content.parts[0].text;
+              core.setOutput('birthday_message', message);
+            } catch (error) {
+              core.setFailed(`Error generating message: ${error.message}`);
+              // Fallback message in case of API failure
+              core.setOutput('birthday_message', 'Happy Birthday, Chandan! 🎉 Wishing you a wonderful day filled with joy and celebration! 🎂');
+            }
+
       - name: Send Email
         uses: dawidd6/action-send-mail@v3
         with:
@@ -17,6 +54,10 @@ jobs:
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: "Happy Birthday, Chandan! 🎉"
-          body: "Wishing you a fantastic birthday, Chandan! 🎂🥳 \n\n - Girish Raghav"
+          body: |
+            ${{ steps.generate-message.outputs.birthday_message }}
+            
+            Best wishes,
+            Girish Raghav
           to: ${{ secrets.EMAIL_RECIPIENT }}
           from: "Girish Raghav"
