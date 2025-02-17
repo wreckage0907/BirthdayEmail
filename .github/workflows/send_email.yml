@@ -1,11 +1,11 @@
-name: Send Birthday Email with Gemini Message
+name: Send Birthday Emails
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 18 * * *'
+    - cron: '30 18 * * *'  # Runs daily at 18:30 UTC
 
 jobs:
-  send-email:
+  send-birthday-email:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -19,22 +19,41 @@ jobs:
       - name: Install dependencies
         run: npm install axios
 
-      - name: Generate Birthday Message
-        id: generate-message
-        uses: actions/github-script@v6
+      - name: Check and Send Birthday Emails
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        with:
-          script: |
-            const axios = require('axios');
-            
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          node <<EOF
+          const fs = require('fs');
+          const axios = require('axios');
+          const core = require('@actions/core');
+
+          // Load birthdays from JSON file
+          const birthdays = JSON.parse(fs.readFileSync('birthdays.json', 'utf8'));
+
+          // Get today's date in MM-DD format
+          const today = new Date().toISOString().slice(5,10);
+
+          // Find birthday match
+          const birthdayPerson = birthdays.find(person => person.birthday === today);
+
+          if (!birthdayPerson) {
+            console.log("No birthdays today.");
+            process.exit(0);
+          }
+
+          async function generateMessage() {
             try {
               const response = await axios.post(
                 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
                 {
                   contents: [{
                     parts: [{
-                      text: "Write a warm, personalized birthday message for Chandan. Keep it under 100 words. Include some emojis."
+                      text: \`Write a warm, personalized birthday message for \${birthdayPerson.name}. Keep it under 100 words. Include some emojis.\`
                     }]
                   }]
                 },
@@ -42,33 +61,41 @@ jobs:
                   headers: {
                     'Content-Type': 'application/json',
                     'x-goog-api-key': process.env.GEMINI_API_KEY
-                  },
-                  params: {
-                    key: process.env.GEMINI_API_KEY
                   }
                 }
               );
               
-              const message = response.data.candidates[0].content.parts[0].text;
-              core.setOutput('birthday_message', message);
+              return response.data.candidates[0].content.parts[0].text;
             } catch (error) {
-              core.setFailed(`Error generating message: ${error.message}`);
-              // Fallback message in case of API failure
-              core.setOutput('birthday_message', 'Happy Birthday, Chandan! 🎉 Wishing you a wonderful day filled with joy and celebration! 🎂');
+              console.error("Error generating message:", error.message);
+              return \`Happy Birthday, \${birthdayPerson.name}! 🎉 Wishing you a wonderful day filled with joy and celebration! 🎂\`;
             }
+          }
 
-      - name: Send Email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_SERVER }}
-          server_port: ${{ secrets.SMTP_PORT }}
-          username: ${{ secrets.EMAIL_USERNAME }}
-          password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "Happy Birthday, Chandan! 🎉"
-          body: |
-            ${{ steps.generate-message.outputs.birthday_message }}
-            
-            Best wishes,
-            Girish Raghav
-          to: ${{ secrets.EMAIL_RECIPIENT }}
-          from: "Girish Raghav"
+          async function sendEmail(message) {
+            const sendMail = require('child_process').execSync;
+            const mailCommand = \`
+              curl --url "smtps://\${process.env.SMTP_SERVER}:\${process.env.SMTP_PORT}" --ssl-reqd \\
+              --mail-from "\${process.env.EMAIL_USERNAME}" \\
+              --mail-rcpt "\${birthdayPerson.email}" \\
+              --user "\${process.env.EMAIL_USERNAME}:\${process.env.EMAIL_PASSWORD}" \\
+              --upload-file - <<EOF
+              Subject: Happy Birthday, \${birthdayPerson.name}! 🎉
+              From: Girish Raghav
+              To: \${birthdayPerson.email}
+
+              \${message}
+
+              Best wishes,
+              Girish Raghav
+              EOF
+            \`;
+
+            sendMail(mailCommand, { stdio: 'inherit' });
+          }
+
+          (async () => {
+            const message = await generateMessage();
+            await sendEmail(message);
+          })();
+          EOF
