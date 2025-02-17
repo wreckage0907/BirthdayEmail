@@ -73,23 +73,23 @@ jobs:
 
           async function sendEmail(message) {
             const sendMail = require('child_process').execSync;
-            const mailCommand = \`
-              curl --url "smtps://\${process.env.SMTP_SERVER}:\${process.env.SMTP_PORT}" --ssl-reqd \\
-              --mail-from "\${process.env.EMAIL_USERNAME}" \\
-              --mail-rcpt "\${birthdayPerson.email}" \\
-              --user "\${process.env.EMAIL_USERNAME}:\${process.env.EMAIL_PASSWORD}" \\
+            const mailCommand = `
+              curl --url "smtp://${process.env.SMTP_SERVER}:587" --ssl-reqd --tlsv1.2 --starttls smtp \\
+              --mail-from "${process.env.EMAIL_USERNAME}" \\
+              --mail-rcpt "${birthdayPerson.email}" \\
+              --user "${process.env.EMAIL_USERNAME}:${process.env.EMAIL_PASSWORD}" \\
               --upload-file - <<EOF
-              Subject: Happy Birthday, \${birthdayPerson.name}! 🎉
+              Subject: Happy Birthday, ${birthdayPerson.name}! 🎉
               From: Girish Raghav
-              To: \${birthdayPerson.email}
-
-              \${message}
-
+              To: ${birthdayPerson.email}
+          
+              ${message}
+          
               Best wishes,
               Girish Raghav
               EOF
-            \`;
-
+            `;
+          
             sendMail(mailCommand, { stdio: 'inherit' });
           }
 
