@@ -2,7 +2,7 @@ name: Send Birthday Emails
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 18 * * *'  # Runs daily at 18:30 UTC (fixed missing asterisk)
+    - cron: '30 18 * * *'  # Runs daily at 18:30 UTC
 jobs:
   send-birthday-email:
     runs-on: ubuntu-latest
@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: '16'
       - name: Install dependencies
-        run: npm install axios
+        run: npm install axios nodemailer
       - name: Check and Send Birthday Emails
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -26,7 +26,7 @@ jobs:
           node <<'ENDOFSCRIPT'
           const fs = require('fs');
           const axios = require('axios');
-          const { execSync } = require('child_process');
+          const nodemailer = require('nodemailer');
 
           // Load birthdays from JSON file
           const birthdays = JSON.parse(fs.readFileSync('birthdays.json', 'utf8'));
@@ -68,26 +68,28 @@ jobs:
           }
           
           async function sendEmail(message) {
-            const mailCommand = `
-              curl --url "smtp://${process.env.SMTP_SERVER}:${process.env.SMTP_PORT}" --ssl-reqd --tlsv1.2 --starttls smtp \\
-              --mail-from "${process.env.EMAIL_USERNAME}" \\
-              --mail-rcpt "${birthdayPerson.email}" \\
-              --user "${process.env.EMAIL_USERNAME}:${process.env.EMAIL_PASSWORD}" \\
-              --upload-file - <<EOF
-              Subject: Happy Birthday, ${birthdayPerson.name}! 🎉
-              From: Girish Raghav
-              To: ${birthdayPerson.email}
-              
-              ${message}
-              
-              Best wishes,
-              Girish Raghav
-              EOF
-            `;
+            // Create a transporter object using SMTP
+            const transporter = nodemailer.createTransport({
+              host: process.env.SMTP_SERVER,
+              port: process.env.SMTP_PORT,
+              secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+              auth: {
+                user: process.env.EMAIL_USERNAME,
+                pass: process.env.EMAIL_PASSWORD
+              }
+            });
             
             try {
-              execSync(mailCommand, { stdio: 'inherit' });
+              // Send email
+              const info = await transporter.sendMail({
+                from: `"Girish Raghav"`,
+                to: birthdayPerson.email,
+                subject: `Happy Birthday, ${birthdayPerson.name}! 🎉`,
+                text: `${message}\n\nBest wishes,\nGirish Raghav`
+              });
+              
               console.log(`Birthday email sent to ${birthdayPerson.name} at ${birthdayPerson.email}`);
+              console.log(`Message ID: ${info.messageId}`);
             } catch (error) {
               console.error("Error sending email:", error.message);
             }
