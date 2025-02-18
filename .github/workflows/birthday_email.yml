@@ -1,0 +1,101 @@
+name: Send Birthday Emails
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 18 * * *'  # Runs daily at 18:30 UTC
+jobs:
+  send-birthday-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'
+      - name: Install dependencies
+        run: npm install axios nodemailer
+      - name: Check and Send Birthday Emails
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          node <<'ENDOFSCRIPT'
+          const fs = require('fs');
+          const axios = require('axios');
+          const nodemailer = require('nodemailer');
+
+          const birthdays = JSON.parse(fs.readFileSync('birthdays.json', 'utf8'));
+          
+          const today = new Date().toISOString().slice(5,10);
+          
+          const birthdayPerson = birthdays.find(person => person.birthday === today);
+          if (!birthdayPerson) {
+            console.log("No birthdays today.");
+            process.exit(0);
+          }
+          
+          async function generateMessage() {
+            try {
+              const response = await axios.post(
+                'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
+                {
+                  contents: [{
+                    parts: [{
+                      text: `Write a warm, personalized birthday message for ${birthdayPerson.name}. Keep it under 100 words. Include some emojis.`
+                    }]
+                  }]
+                },
+                {
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-goog-api-key': process.env.GEMINI_API_KEY
+                  }
+                }
+              );
+              
+              return response.data.candidates[0].content.parts[0].text;
+            } catch (error) {
+              console.error("Error generating message:", error.message);
+              return `Happy Birthday, ${birthdayPerson.name}! 🎉 Wishing you a wonderful day filled with joy and celebration! 🎂`;
+            }
+          }
+          
+          async function sendEmail(message) {
+            const transporter = nodemailer.createTransport({
+              host: process.env.SMTP_SERVER,
+              port: process.env.SMTP_PORT,
+              secure: process.env.SMTP_PORT === '465',
+              auth: {
+                user: process.env.EMAIL_USERNAME,
+                pass: process.env.EMAIL_PASSWORD
+              }
+            });
+            
+            try {
+              const info = await transporter.sendMail({
+                from: `Girish Raghav`,
+                to: birthdayPerson.email,
+                subject: `Happy Birthday, ${birthdayPerson.name}! 🎉`,
+                text: `${message}\n\nBest wishes,\nGirish Raghav`
+              });
+              
+              console.log(`Birthday email sent to ${birthdayPerson.name} at ${birthdayPerson.email}`);
+              console.log(`Message ID: ${info.messageId}`);
+            } catch (error) {
+              console.error("Error sending email:", error.message);
+            }
+          }
+          
+          (async () => {
+            try {
+              const message = await generateMessage();
+              await sendEmail(message);
+            } catch (error) {
+              console.error("Error in main process:", error.message);
+            }
+          })();
+          ENDOFSCRIPT
