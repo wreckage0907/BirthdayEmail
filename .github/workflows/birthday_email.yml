@@ -10,71 +10,67 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-
+        
       - name: Setup Node.js
         uses: actions/setup-node@v2
         with:
           node-version: '16'
-
+          
       - name: Install dependencies
         run: npm install axios
-
+        
       - name: Check Birthday List
         id: check-birthday
         run: |
           echo "Checking today's birthdays..."
           birthdays=$(cat birthdays.json)
           today=$(date +%m-%d)
-
           name=$(echo "$birthdays" | jq -r --arg today "$today" '.[] | select(.birthday == $today) | .name')
           email=$(echo "$birthdays" | jq -r --arg today "$today" '.[] | select(.birthday == $today) | .email')
-
           if [ -z "$name" ] || [ -z "$email" ]; then
             echo "No birthdays today."
             exit 0
           fi
-
-          echo "birthday_name=$name" >> $GITHUB_ENV
-          echo "birthday_email=$email" >> $GITHUB_ENV
-
+          echo "BIRTHDAY_NAME=$name" >> $GITHUB_ENV
+          echo "BIRTHDAY_EMAIL=$email" >> $GITHUB_ENV
+          
       - name: Generate Birthday Message
         id: generate-message
-        if: env.birthday_name != ''
+        if: env.BIRTHDAY_NAME != ''
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "Generating a birthday message for $birthday_name..."
+          echo "Generating a birthday message for $BIRTHDAY_NAME..."
           message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" \
             -H "Content-Type: application/json" \
             -H "x-goog-api-key: $GEMINI_API_KEY" \
             -d '{
               "contents": [{
                 "parts": [{
-                  "text": "Write a warm, personalized birthday message for '"$birthday_name"'. Keep it under 100 words. Include some emojis."
+                  "text": "Write a warm, personalized birthday message for '"$BIRTHDAY_NAME"'. Keep it under 100 words. Include some emojis."
                 }]
               }]
             }' | jq -r '.candidates[0].content.parts[0].text')
-
           if [ -z "$message" ] || [ "$message" == "null" ]; then
-            message="Happy Birthday, $birthday_name! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
+            message="Happy Birthday, $BIRTHDAY_NAME! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
           fi
-
-          echo "birthday_message=$message" >> $GITHUB_ENV
-          echo "Generated Message: $message"
-
+          echo "BIRTHDAY_MESSAGE<<EOF" >> $GITHUB_ENV
+          echo "$message" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
       - name: Send Email
-        if: env.birthday_name != ''
+        if: env.BIRTHDAY_NAME != ''
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.SMTP_SERVER }}
           server_port: ${{ secrets.SMTP_PORT }}
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "Happy Birthday, ${{ env.birthday_name }}! 🎉"
+          subject: "Happy Birthday, ${{ env.BIRTHDAY_NAME }}! 🎉"
           body: |
-            ${{ env.birthday_message }}
+            ${{ env.BIRTHDAY_MESSAGE }}
             
             Best wishes,
             Girish Raghav
-          to: ${{ env.birthday_email }}
+          to: ${{ env.BIRTHDAY_EMAIL }}
           from: "Girish Raghav"
