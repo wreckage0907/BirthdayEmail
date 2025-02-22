@@ -73,4 +73,4 @@ jobs:
             Best wishes,
             Girish Raghav
           to: ${{ env.BIRTHDAY_EMAIL }}
-          from: "Girish Raghav"
+          from: Girish Raghav <${{ secrets.EMAIL_USERNAME }}>
