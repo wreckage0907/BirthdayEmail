@@ -19,11 +19,12 @@ jobs:
           birthdays=$(cat birthdays.json)
           today=$(date +%m-%d)
           
-          # Get all birthdays for today as a JSON array
-          todays_birthdays=$(echo "$birthdays" | jq --arg today "$today" '[.[] | select(.birthday == $today) | {name: .name, email: .email}]')
+          # Get all birthdays for today as a JSON array and properly escape it
+          todays_birthdays=$(echo "$birthdays" | jq -c --arg today "$today" '[.[] | select(.birthday == $today) | {name: .name, email: .email}]')
           
-          # Output as a matrix for the next job
-          echo "matrix=$todays_birthdays" >> $GITHUB_OUTPUT
+          # Properly escape the JSON string for GitHub Actions output
+          escaped_json=$(echo "$todays_birthdays" | jq -c -R .)
+          echo "matrix=${escaped_json:1:-1}" >> $GITHUB_OUTPUT
           
           # Log for debugging
           echo "Found $(echo "$todays_birthdays" | jq length) birthdays today."
