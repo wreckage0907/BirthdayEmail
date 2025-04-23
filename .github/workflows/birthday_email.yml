@@ -5,91 +5,96 @@ on:
     - cron: '30 18 * * *'  # Runs daily at 18:30 UTC
 
 jobs:
-  send-birthday-email:
+  check-birthdays:
     runs-on: ubuntu-latest
+    outputs:
+      has-birthdays: ${{ steps.check.outputs.has_birthdays }}
+      birthdays-json: ${{ steps.check.outputs.birthdays_json }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-        
+      
+      - name: Check Birthday List
+        id: check
+        run: |
+          echo "Checking today's birthdays..."
+          birthdays=$(cat birthdays.json)
+          today=$(date +%m-%d)
+          
+          # Get all birthdays for today as a JSON string
+          todays_birthdays=$(echo "$birthdays" | jq -c --arg today "$today" '[.[] | select(.birthday == $today) | {name: .name, email: .email}]')
+          
+          # Count birthdays
+          count=$(echo "$todays_birthdays" | jq 'length')
+          echo "Found $count birthdays today"
+          
+          # Output whether we have birthdays and the JSON string
+          if [ "$count" -gt 0 ]; then
+            echo "has_birthdays=true" >> $GITHUB_OUTPUT
+            # Escape the JSON properly for GitHub Actions output
+            echo "birthdays_json<<EOF" >> $GITHUB_OUTPUT
+            echo "$todays_birthdays" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "has_birthdays=false" >> $GITHUB_OUTPUT
+          fi
+
+  process-birthdays:
+    needs: check-birthdays
+    if: needs.check-birthdays.outputs.has-birthdays == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        person: ${{ fromJson(needs.check-birthdays.outputs.birthdays-json) }}
+    steps:
       - name: Setup Node.js
         uses: actions/setup-node@v2
         with:
           node-version: '16'
           
       - name: Install dependencies
-        run: |
-          npm install axios
-          sudo apt-get install -y swaks  # Simple mail sender tool
+        run: npm install axios
         
-      - name: Process Birthdays and Send Emails
+      - name: Generate Birthday Message
+        id: generate-message
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
-          echo "Checking today's birthdays..."
-          birthdays=$(cat birthdays.json)
-          today=$(date +%m-%d)
+          name="${{ matrix.person.name }}"
+          echo "Generating a birthday message for $name..."
           
-          # Get all birthdays for today
-          echo "$birthdays" | jq -c --arg today "$today" '.[] | select(.birthday == $today)' > /tmp/todays_birthdays.json
+          message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" \
+            -H "Content-Type: application/json" \
+            -H "x-goog-api-key: $GEMINI_API_KEY" \
+            -d '{
+              "contents": [{
+                "parts": [{
+                  "text": "Write a warm, personalized birthday message for '"$name"'. Keep it under 100 words. Include some emojis."
+                }]
+              }]
+            }' | jq -r '.candidates[0].content.parts[0].text')
           
-          # Count the number of birthdays
-          count=$(wc -l < /tmp/todays_birthdays.json || echo 0)
-          echo "Found $count birthdays today."
-          
-          # If no birthdays today, exit
-          if [ "$count" -eq 0 ]; then
-            echo "No birthdays today."
-            exit 0
+          if [ -z "$message" ] || [ "$message" == "null" ]; then
+            message="Happy Birthday, $name! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
           fi
           
-          # Process each birthday one at a time
-          cat /tmp/todays_birthdays.json | while read -r person; do
-            name=$(echo "$person" | jq -r '.name')
-            email=$(echo "$person" | jq -r '.email')
+          # Save message for next step
+          echo "BIRTHDAY_MESSAGE<<EOF" >> $GITHUB_ENV
+          echo "$message" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Happy Birthday, ${{ matrix.person.name }}! 🎉"
+          body: |
+            ${{ env.BIRTHDAY_MESSAGE }}
             
-            echo "Processing birthday for $name..."
-            
-            # Generate birthday message
-            message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" \
-              -H "Content-Type: application/json" \
-              -H "x-goog-api-key: $GEMINI_API_KEY" \
-              -d '{
-                "contents": [{
-                  "parts": [{
-                    "text": "Write a warm, personalized birthday message for '"$name"'. Keep it under 100 words. Include some emojis."
-                  }]
-                }]
-              }' | jq -r '.candidates[0].content.parts[0].text')
-              
-            if [ -z "$message" ] || [ "$message" == "null" ]; then
-              message="Happy Birthday, $name! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
-            fi
-            
-            # Create a temporary file for the email body
-            email_body_file=$(mktemp)
-            echo "$message" > "$email_body_file"
-            echo "" >> "$email_body_file"
-            echo "Best wishes," >> "$email_body_file"
-            echo "Girish Raghav" >> "$email_body_file"
-            
-            # Send email using swaks (Swiss Army Knife for SMTP)
-            echo "Sending email to $name at $email..."
-            swaks --server "$SMTP_SERVER:$SMTP_PORT" \
-                  --tls \
-                  --auth LOGIN \
-                  --auth-user "$EMAIL_USERNAME" \
-                  --auth-password "$EMAIL_PASSWORD" \
-                  --from "$EMAIL_USERNAME" \
-                  --to "$email" \
-                  --header "Subject: Happy Birthday, $name! 🎉" \
-                  --body-file "$email_body_file"
-            
-            # Clean up
-            rm "$email_body_file"
-            
-            echo "Email sent to $name!"
-          done
+            Best wishes,
+            Girish Raghav
+          to: ${{ matrix.person.email }}
+          from: Girish Raghav <${{ secrets.EMAIL_USERNAME }}>
