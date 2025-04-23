@@ -4,12 +4,38 @@ on:
   schedule:
     - cron: '30 18 * * *'  # Runs daily at 18:30 UTC
 jobs:
-  send-birthday-email:
+  find-birthdays:
     runs-on: ubuntu-latest
+    outputs:
+      birthday-matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-        
+      
+      - name: Check Birthday List
+        id: set-matrix
+        run: |
+          echo "Checking today's birthdays..."
+          birthdays=$(cat birthdays.json)
+          today=$(date +%m-%d)
+          
+          # Get all birthdays for today as a JSON array
+          todays_birthdays=$(echo "$birthdays" | jq --arg today "$today" '[.[] | select(.birthday == $today) | {name: .name, email: .email}]')
+          
+          # Output as a matrix for the next job
+          echo "matrix=$todays_birthdays" >> $GITHUB_OUTPUT
+          
+          # Log for debugging
+          echo "Found $(echo "$todays_birthdays" | jq length) birthdays today."
+
+  send-emails:
+    needs: find-birthdays
+    if: ${{ fromJson(needs.find-birthdays.outputs.birthday-matrix)[0] }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        birthday: ${{ fromJson(needs.find-birthdays.outputs.birthday-matrix) }}
+    steps:
       - name: Setup Node.js
         uses: actions/setup-node@v2
         with:
@@ -18,76 +44,45 @@ jobs:
       - name: Install dependencies
         run: npm install axios
         
-      - name: Check Birthday List and Send Emails
+      - name: Generate Birthday Message
+        id: generate-message
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          BIRTHDAY_NAME: ${{ matrix.birthday.name }}
         run: |
-          echo "Checking today's birthdays..."
-          birthdays=$(cat birthdays.json)
-          today=$(date +%m-%d)
+          echo "Generating a birthday message for $BIRTHDAY_NAME..."
+          message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" \
+            -H "Content-Type: application/json" \
+            -H "x-goog-api-key: $GEMINI_API_KEY" \
+            -d '{
+              "contents": [{
+                "parts": [{
+                  "text": "Write a warm, personalized birthday message for '"$BIRTHDAY_NAME"'. Keep it under 100 words. Include some emojis."
+                }]
+              }]
+            }' | jq -r '.candidates[0].content.parts[0].text')
           
-          # Extract all birthdays for today and store as JSON array
-          todays_birthdays=$(echo "$birthdays" | jq --arg today "$today" '[.[] | select(.birthday == $today)]')
-          birthday_count=$(echo "$todays_birthdays" | jq length)
-          
-          if [ "$birthday_count" -eq 0 ]; then
-            echo "No birthdays today."
-            exit 0
+          if [ -z "$message" ] || [ "$message" == "null" ]; then
+            message="Happy Birthday, $BIRTHDAY_NAME! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
           fi
           
-          echo "Found $birthday_count birthdays today!"
+          # Save message to environment for use in next step
+          echo "BIRTHDAY_MESSAGE<<EOF" >> $GITHUB_ENV
+          echo "$message" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
           
-          # Loop through each birthday person
-          for i in $(seq 0 $(($birthday_count - 1))); do
-            name=$(echo "$todays_birthdays" | jq -r ".[$i].name")
-            email=$(echo "$todays_birthdays" | jq -r ".[$i].email")
+      - name: Send Email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Happy Birthday, ${{ matrix.birthday.name }}! 🎉"
+          body: |
+            ${{ env.BIRTHDAY_MESSAGE }}
             
-            echo "Generating birthday message for $name..."
-            
-            # Generate birthday message
-            message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" \
-              -H "Content-Type: application/json" \
-              -H "x-goog-api-key: $GEMINI_API_KEY" \
-              -d '{
-                "contents": [{
-                  "parts": [{
-                    "text": "Write a warm, personalized birthday message for '"$name"'. Keep it under 100 words. Include some emojis."
-                  }]
-                }]
-              }' | jq -r '.candidates[0].content.parts[0].text')
-              
-            if [ -z "$message" ] || [ "$message" == "null" ]; then
-              message="Happy Birthday, $name! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
-            fi
-            
-            # Send email
-            echo "Sending birthday email to $name at $email..."
-            
-            # Create a temporary email content file
-            email_content=$(cat <<EOF
-Subject: Happy Birthday, $name! 🎉
-From: Girish Raghav <$EMAIL_USERNAME>
-To: $email
-Content-Type: text/plain; charset="UTF-8"
-
-$message
-
-Best wishes,
-Girish Raghav
-EOF
-)
-            
-            # Use curl to send the email via SMTP
-            echo "$email_content" | curl --url "smtp://$SMTP_SERVER:$SMTP_PORT" \
-              --ssl-reqd \
-              --mail-from "$EMAIL_USERNAME" \
-              --mail-rcpt "$email" \
-              --user "$EMAIL_USERNAME:$EMAIL_PASSWORD" \
-              -T -
-              
-            echo "Email sent to $name!"
-          done
+            Best wishes,
+            Girish Raghav
+          to: ${{ matrix.birthday.email }}
+          from: Girish Raghav <${{ secrets.EMAIL_USERNAME }}>
