@@ -63,7 +63,7 @@ jobs:
           name="${{ matrix.person.name }}"
           echo "Generating a birthday message for $name..."
           
-          message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent" \
+          message=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
             -H "Content-Type: application/json" \
             -H "x-goog-api-key: $GEMINI_API_KEY" \
             -d '{
@@ -73,6 +73,9 @@ jobs:
                 }]
               }]
             }' | jq -r '.candidates[0].content.parts[0].text')
+          
+          echo "$message"
+
           
           if [ -z "$message" ] || [ "$message" == "null" ]; then
             message="Happy Birthday, $name! 🎉 Wishing you a fantastic day filled with love and joy! 🎂"
